@@ -210,6 +210,7 @@ public partial class Game1 : Game
         _inputBindings = InputBindingsSettings.Load();
         _graphics = new GraphicsDeviceManager(this);
         Content.RootDirectory = "Content";
+        ContentRoot.Initialize(Content.RootDirectory);
         IsMouseVisible = false;
         _graphics.PreferredBackBufferWidth = 1280;
         _graphics.PreferredBackBufferHeight = 720;

@@ -85,7 +85,7 @@ public partial class Game1
 
         if (_menuBackgroundTexture is null)
         {
-            var path = ProjectSourceLocator.FindFile(Path.Combine("OpenGarrison.Core", "Content", "Sprites", "Menu", "Title", "background.jpg"));
+            var path = ContentRoot.GetPath("Sprites", "Menu", "Title", "background.jpg");
             if (path is not null && File.Exists(path))
             {
                 using var stream = File.OpenRead(path);

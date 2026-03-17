@@ -11,7 +11,8 @@ public static class GameMakerAssetManifestImporter
 {
     public static GameMakerAssetManifest ImportProjectAssets()
     {
-        var sourceRootFile = ProjectSourceLocator.FindFile("OpenGarrison.Core/Content/Constants.xml");
+        var sourceRootFile = ContentRoot.GetPath("Constants.xml");
+        // var sourceRootFile = ProjectSourceLocator.FindFile("OpenGarrison.Core/Content/Constants.xml");
         if (sourceRootFile is null)
         {
             return new GameMakerAssetManifest(
@@ -22,8 +23,9 @@ public static class GameMakerAssetManifestImporter
         }
 
         var sourceRootPath = Path.GetDirectoryName(sourceRootFile)!;
-        var sprites = ImportSprites(Path.Combine(sourceRootPath, "Sprites"));
-        var modernAssetSpriteMetadata = ProjectSourceLocator.FindFile("Gang-Garrison-2/Source/gg2/Sprites/OpenGarrisonFontS.xml");
+        var sprites = ImportSprites(ContentRoot.GetPath("Sprites"));
+        // var sprites = ImportSprites(Path.Combine(sourceRootPath, "Sprites"));
+        var modernAssetSpriteMetadata = ContentRoot.GetPath("Sprites", "gg2FontS.xml");
         if (modernAssetSpriteMetadata is not null)
         {
             ImportSprite(modernAssetSpriteMetadata, sprites);

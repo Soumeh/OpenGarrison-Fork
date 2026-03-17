@@ -30,7 +30,7 @@ public partial class Game1
         LoadedGameMakerSprite? fontSprite;
         try
         {
-            fontSprite = _runtimeAssets.GetSprite("OpenGarrisonFontS");
+            fontSprite = _runtimeAssets.GetSprite("gg2FontS");
         }
         catch
         {

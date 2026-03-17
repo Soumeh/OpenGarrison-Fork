@@ -17,15 +17,15 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Build Linux
-        run: bash build.sh linux-x64
+        run: bash scripts/build.sh linux-x64
 
       - name: Build Windows
-        run: bash build.sh win-x64
+        run: bash scripts/build.sh win-x64
 
       - name: Zip artifacts
         run: |
-          zip -r OpenGarrison-linux-x64.zip dist/linux-x64/
-          zip -r OpenGarrison-win-x64.zip dist/win-x64/
+          zip -r OpenGarrison-Linux-x64.zip dist/linux-x64/
+          zip -r OpenGarrison-Windows-x64.zip dist/win-x64/
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2

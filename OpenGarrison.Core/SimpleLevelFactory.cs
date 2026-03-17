@@ -130,7 +130,7 @@ public static class SimpleLevelFactory
         }
 
         var entries = new List<LevelCatalogEntry>();
-        var mapsDirectory = ProjectSourceLocator.FindDirectory(Path.Combine("OpenGarrison.Core", "Content", "Rooms", "Maps"));
+        var mapsDirectory = ProjectSourceLocator.FindDirectory(ContentRoot.GetPath("Rooms", "Maps"));
         if (mapsDirectory is not null)
         {
             foreach (var mapFile in Directory.EnumerateFiles(mapsDirectory, "*.xml"))
@@ -270,7 +270,7 @@ public static class SimpleLevelFactory
 
     private static string? FindCollisionMaskPath(string mapName)
     {
-        var collisionDirectory = ProjectSourceLocator.FindDirectory(Path.Combine("OpenGarrison.Core", "Content", "Sprites", "Collision Maps"));
+        var collisionDirectory = ContentRoot.GetPath("Sprites", "Collision Maps");
         if (collisionDirectory is null)
         {
             return null;
