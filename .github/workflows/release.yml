@@ -16,10 +16,10 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Build Linux
-        run: sh build.sh linux-x64
+        run: bash build.sh linux-x64
 
       - name: Build Windows
-        run: sh build.sh win-x64
+        run: bash build.sh win-x64
 
       - name: Zip artifacts
         run: |
