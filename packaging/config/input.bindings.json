@@ -1,0 +1,11 @@
+{
+  "MoveLeft": "A",
+  "MoveRight": "D",
+  "MoveUp": "W",
+  "MoveDown": "S",
+  "Taunt": "T",
+  "DebugKill": "K",
+  "ShowScoreboard": "Tab",
+  "ToggleClassMenu": "OemComma",
+  "ToggleConsole": "OemTilde"
+}

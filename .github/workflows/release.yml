@@ -1,0 +1,87 @@
+name: Build & Release
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+            artifact: OpenGarrison-linux-x64
+          - os: windows-latest
+            rid: win-x64
+            artifact: OpenGarrison-win-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      # - name: Install Wine + shader support (Linux only)
+      #   if: runner.os == 'Linux'
+      #   run: |
+      #     sudo apt-get update
+      #     sudo apt-get install -y wine64 p7zip-full
+      #     wget -qO- https://monogame.net/downloads/net9_mgfxc_wine_setup.sh | bash
+      #     echo "MGFXC_WINE_PATH=$HOME/.winemonogame" >> $GITHUB_ENV
+
+      - name: Restore tools
+        working-directory: OpenGarrison/OpenGarrison.DesktopGL
+        run: dotnet tool restore
+
+      - name: Restore dependencies
+        working-directory: OpenGarrison/OpenGarrison.DesktopGL
+        run: dotnet restore
+
+      - name: Build & Publish
+        working-directory: OpenGarrison/OpenGarrison.DesktopGL
+        run: >
+          dotnet publish
+          -c Release
+          -r ${{ matrix.rid }}
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o ./dist/${{ matrix.rid }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: Zip artifacts
+        run: |
+          cd dist
+          zip -r OpenGarrison-linux-x64.zip linux-x64/
+          zip -r OpenGarrison-win-x64.zip win-x64/
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: |
+            dist/OpenGarrison-linux-x64.zip
+            dist/OpenGarrison-win-x64.zip

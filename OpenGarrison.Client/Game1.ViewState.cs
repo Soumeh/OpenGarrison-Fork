@@ -1,0 +1,360 @@
+#nullable enable
+
+using Microsoft.Xna.Framework;
+using System;
+using System.Collections.Generic;
+using OpenGarrison.Core;
+
+namespace OpenGarrison.Client;
+
+public partial class Game1
+{
+    private Vector2 GetCameraTopLeft(int viewportWidth, int viewportHeight, int mouseX, int mouseY)
+    {
+        float x;
+        float y;
+        if (_killCamEnabled && !_world.LocalPlayer.IsAlive && _world.LocalDeathCam is not null)
+        {
+            return GetDeathCamCameraTopLeft(viewportWidth, viewportHeight);
+        }
+
+        var localViewPosition = GetLocalViewPosition();
+        if (GetPlayerIsSniperScoped(_world.LocalPlayer))
+        {
+            x = Math.Clamp(
+                localViewPosition.X + mouseX - viewportWidth,
+                0f,
+                Math.Max(0f, _world.Bounds.Width - viewportWidth));
+            y = Math.Clamp(
+                localViewPosition.Y + mouseY - viewportHeight,
+                0f,
+                Math.Max(0f, _world.Bounds.Height - viewportHeight));
+        }
+        else
+        {
+            var halfViewportWidth = viewportWidth / 2f;
+            var halfViewportHeight = viewportHeight / 2f;
+
+            x = Math.Clamp(
+                localViewPosition.X - halfViewportWidth,
+                0f,
+                Math.Max(0f, _world.Bounds.Width - viewportWidth));
+            y = Math.Clamp(
+                localViewPosition.Y - halfViewportHeight,
+                0f,
+                Math.Max(0f, _world.Bounds.Height - viewportHeight));
+        }
+
+        var cameraTopLeft = new Vector2(x, y);
+        TrackLiveCamera(cameraTopLeft);
+        return cameraTopLeft;
+    }
+
+    private Vector2 GetLocalViewPosition()
+    {
+        if (_networkClient.IsSpectator)
+        {
+            var spectatorFocus = GetSpectatorFocusPlayer();
+            if (spectatorFocus is not null)
+            {
+                return GetRenderPosition(spectatorFocus);
+            }
+        }
+
+        if (_networkClient.IsConnected && _world.LocalPlayer.IsAlive)
+        {
+            if (_hasSmoothedLocalPlayerRenderPosition)
+            {
+                return _smoothedLocalPlayerRenderPosition;
+            }
+
+            if (_hasPredictedLocalPlayerPosition)
+            {
+                return _predictedLocalPlayerPosition;
+            }
+        }
+
+        return new Vector2(_world.LocalPlayer.X, _world.LocalPlayer.Y);
+    }
+
+    private bool IsUsingPredictedLocalState(PlayerEntity player)
+    {
+        return _networkClient.IsConnected
+            && ReferenceEquals(player, _world.LocalPlayer)
+            && _hasPredictedLocalActionState;
+    }
+
+    private bool GetPlayerIsHeavyEating(PlayerEntity player)
+    {
+        return IsUsingPredictedLocalState(player)
+            ? _predictedLocalActionState.IsHeavyEating
+            : player.IsHeavyEating;
+    }
+
+    private int GetPlayerHeavyEatTicksRemaining(PlayerEntity player)
+    {
+        return IsUsingPredictedLocalState(player)
+            ? _predictedLocalActionState.HeavyEatTicksRemaining
+            : player.HeavyEatTicksRemaining;
+    }
+
+    private bool GetPlayerIsSniperScoped(PlayerEntity player)
+    {
+        return IsUsingPredictedLocalState(player)
+            ? _predictedLocalActionState.IsSniperScoped
+            : player.IsSniperScoped;
+    }
+
+    private int GetPlayerSniperChargeTicks(PlayerEntity player)
+    {
+        return IsUsingPredictedLocalState(player)
+            ? _predictedLocalActionState.SniperChargeTicks
+            : player.SniperChargeTicks;
+    }
+
+    private int GetPlayerSniperRifleDamage(PlayerEntity player)
+    {
+        if (player.ClassId != PlayerClass.Sniper || !GetPlayerIsSniperScoped(player))
+        {
+            return PlayerEntity.SniperBaseDamage;
+        }
+
+        var chargeTicks = GetPlayerSniperChargeTicks(player);
+        return PlayerEntity.SniperBaseDamage + (int)MathF.Floor(MathF.Sqrt(chargeTicks * 125f / 6f));
+    }
+
+    private bool GetPlayerIsSpyCloaked(PlayerEntity player)
+    {
+        return IsUsingPredictedLocalState(player)
+            ? _predictedLocalActionState.IsSpyCloaked
+            : player.IsSpyCloaked;
+    }
+
+    private float GetPlayerSpyCloakAlpha(PlayerEntity player)
+    {
+        return IsUsingPredictedLocalState(player)
+            ? _predictedLocalActionState.SpyCloakAlpha
+            : player.SpyCloakAlpha;
+    }
+
+    private bool GetPlayerIsSpyVisibleToEnemies(PlayerEntity player)
+    {
+        return IsUsingPredictedLocalState(player)
+            ? _predictedLocalActionState.IsSpyVisibleToEnemies
+            : player.IsSpyVisibleToEnemies;
+    }
+
+    private float GetPlayerVisibilityAlpha(PlayerEntity player)
+    {
+        if (!player.IsAlive)
+        {
+            return 1f;
+        }
+
+        var bodyVisibilityScale = GetSpyBackstabBodyVisibilityScale(player);
+        if (!GetPlayerIsSpyCloaked(player))
+        {
+            return bodyVisibilityScale;
+        }
+
+        if (_networkClient.IsSpectator)
+        {
+            return bodyVisibilityScale;
+        }
+
+        var cloakAlpha = Math.Clamp(GetPlayerSpyCloakAlpha(player), 0f, 1f);
+        if (ReferenceEquals(player, _world.LocalPlayer))
+        {
+            return Math.Max(cloakAlpha, PlayerEntity.SpyMinAllyCloakAlpha) * bodyVisibilityScale;
+        }
+
+        if (player.Team == _world.LocalPlayer.Team)
+        {
+            var allyAlpha = GetPlayerIsSpyBackstabReady(player)
+                ? Math.Max(cloakAlpha, PlayerEntity.SpyMinAllyCloakAlpha)
+                : cloakAlpha;
+            return allyAlpha * bodyVisibilityScale;
+        }
+
+        if (IsSpyHiddenFromLocalViewer(player))
+        {
+            return 0f;
+        }
+
+        return cloakAlpha * bodyVisibilityScale;
+    }
+
+    private bool GetPlayerIsSpyBackstabReady(PlayerEntity player)
+    {
+        if (!IsUsingPredictedLocalState(player))
+        {
+            return player.IsSpyBackstabReady;
+        }
+
+        return _predictedLocalActionState.SpyBackstabWindupTicksRemaining <= 0
+            && _predictedLocalActionState.SpyBackstabRecoveryTicksRemaining <= 0;
+    }
+
+    private bool GetPlayerIsSpyBackstabAnimating(PlayerEntity player)
+    {
+        if (!IsUsingPredictedLocalState(player))
+        {
+            return player.IsSpyBackstabAnimating;
+        }
+
+        return _predictedLocalActionState.SpyBackstabVisualTicksRemaining > 0;
+    }
+
+    private int GetPlayerSpyBackstabVisualTicksRemaining(PlayerEntity player)
+    {
+        if (!IsUsingPredictedLocalState(player))
+        {
+            return player.SpyBackstabVisualTicksRemaining;
+        }
+
+        return _predictedLocalActionState.SpyBackstabVisualTicksRemaining;
+    }
+
+    private float GetSpyBackstabBodyVisibilityScale(PlayerEntity player)
+    {
+        if (player.ClassId != PlayerClass.Spy)
+        {
+            return 1f;
+        }
+
+        var visualTicksRemaining = GetPlayerSpyBackstabVisualTicksRemaining(player);
+        if (visualTicksRemaining <= 0)
+        {
+            return 1f;
+        }
+
+        const int bodyFadeTicks = 4;
+        var elapsedTicks = StabAnimEntity.TotalLifetimeTicks - visualTicksRemaining;
+        if (elapsedTicks < bodyFadeTicks)
+        {
+            return Math.Clamp(1f - (elapsedTicks / (float)bodyFadeTicks), 0f, 1f);
+        }
+
+        if (visualTicksRemaining <= StabAnimEntity.FadeOutTicks)
+        {
+            return Math.Clamp(1f - (visualTicksRemaining / (float)StabAnimEntity.FadeOutTicks), 0f, 1f);
+        }
+
+        return 0f;
+    }
+
+    private bool IsSpyHiddenFromLocalViewer(PlayerEntity player)
+    {
+        if (_networkClient.IsSpectator
+            || ReferenceEquals(player, _world.LocalPlayer)
+            || player.ClassId != PlayerClass.Spy
+            || player.Team == _world.LocalPlayer.Team
+            || !GetPlayerIsSpyCloaked(player)
+            || !_world.LocalPlayer.IsAlive)
+        {
+            return false;
+        }
+
+        return IsSpyHiddenFromLocalViewer(player.Id, player.Team, player.X);
+    }
+
+    private bool IsSpyHiddenFromLocalViewer(int ownerId, PlayerTeam ownerTeam, float spyX)
+    {
+        if (_networkClient.IsSpectator
+            || !_world.LocalPlayer.IsAlive
+            || ownerId == _world.LocalPlayer.Id
+            || ownerTeam == _world.LocalPlayer.Team)
+        {
+            return false;
+        }
+
+        var viewerFacingSign = IsFacingLeftByAim(_world.LocalPlayer) ? -1 : 1;
+        return Math.Sign(spyX - _world.LocalPlayer.X) == -viewerFacingSign;
+    }
+
+    private float GetPlayerMedicUberCharge(PlayerEntity player)
+    {
+        return IsUsingPredictedLocalState(player)
+            ? _predictedLocalActionState.MedicUberCharge
+            : player.MedicUberCharge;
+    }
+
+    private float GetPlayerMetal(PlayerEntity player)
+    {
+        return IsUsingPredictedLocalState(player)
+            ? _predictedLocalActionState.Metal
+            : player.Metal;
+    }
+
+    private PlayerEntity? GetSpectatorFocusPlayer()
+    {
+        PlayerEntity? fallback = null;
+        foreach (var player in EnumerateRemotePlayersForView())
+        {
+            if (player.IsAlive)
+            {
+                return player;
+            }
+
+            fallback ??= player;
+        }
+
+        return fallback;
+    }
+
+    private IEnumerable<PlayerEntity> EnumerateRemotePlayersForView()
+    {
+        if (_networkClient.IsConnected)
+        {
+            for (var index = 0; index < _world.RemoteSnapshotPlayers.Count; index += 1)
+            {
+                yield return _world.RemoteSnapshotPlayers[index];
+            }
+
+            yield break;
+        }
+
+        if (_config.EnableEnemyTrainingDummy && _world.EnemyPlayerEnabled)
+        {
+            yield return _world.EnemyPlayer;
+        }
+
+        if (_config.EnableFriendlySupportDummy && _world.FriendlyDummyEnabled)
+        {
+            yield return _world.FriendlyDummy;
+        }
+    }
+
+    private static string GetIntelStateLabel(TeamIntelligenceState intelState)
+    {
+        if (intelState.IsAtBase)
+        {
+            return "home";
+        }
+
+        if (intelState.IsDropped)
+        {
+            return $"dropped:{intelState.ReturnTicksRemaining}";
+        }
+
+        return "carried";
+    }
+
+    private PlayerEntity? FindPlayerById(int playerId)
+    {
+        if ((_localPlayerSnapshotEntityId ?? _world.LocalPlayer.Id) == playerId)
+        {
+            return _world.LocalPlayer;
+        }
+
+        foreach (var player in EnumerateRemotePlayersForView())
+        {
+            if (player.Id == playerId)
+            {
+                return player;
+            }
+        }
+
+        return null;
+    }
+}

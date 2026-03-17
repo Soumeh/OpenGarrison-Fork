@@ -1,0 +1,403 @@
+#nullable enable
+
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Audio;
+using Microsoft.Xna.Framework.Graphics;
+using Microsoft.Xna.Framework.Input;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Net.Sockets;
+using System.Threading.Tasks;
+using OpenGarrison.Core;
+using OpenGarrison.Protocol;
+
+
+namespace OpenGarrison.Client;
+
+public partial class Game1 : Game
+{
+    private enum BubbleMenuKind
+    {
+        None,
+        Z,
+        X,
+        C,
+    }
+
+    private enum NoticeKind
+    {
+        NutsNBolts = 0,
+        TooClose = 1,
+        AutogunScrapped = 2,
+        AutogunExists = 3,
+        HaveIntel = 4,
+        SetCheckpoint = 5,
+        DestroyCheckpoint = 6,
+        PlayerTrackEnable = 7,
+        PlayerTrackDisable = 8,
+    }
+
+    private enum HostSetupEditField
+    {
+        None,
+        ServerName,
+        Port,
+        Slots,
+        Password,
+        MapRotationFile,
+        TimeLimit,
+        CapLimit,
+        RespawnSeconds,
+        ServerConsoleCommand,
+    }
+
+    private enum HostSetupTab
+    {
+        Settings,
+        ServerConsole,
+    }
+
+    private enum ControlsMenuBinding
+    {
+        MoveUp,
+        MoveLeft,
+        MoveRight,
+        MoveDown,
+        Taunt,
+        ChangeTeam,
+        ChangeClass,
+        ShowScoreboard,
+        ToggleConsole,
+    }
+
+    private const int ProcessedNetworkEventHistoryLimit = 4096;
+    private readonly GameStartupMode _startupMode;
+    private readonly GraphicsDeviceManager _graphics;
+    private SimulationConfig _config = null!;
+    private SimulationWorld _world = null!;
+    private FixedStepSimulator _simulator = null!;
+    private readonly NetworkGameClient _networkClient = new();
+    private readonly GameMakerAssetManifest _assetManifest;
+    private SpriteBatch _spriteBatch = null!;
+    private Texture2D _pixel = null!;
+    private Texture2D? _menuBackgroundTexture;
+    private SpriteFont _consoleFont = null!;
+    private GameMakerRuntimeAssetCache _runtimeAssets = null!;
+    private KeyboardState _previousKeyboard;
+    private readonly Dictionary<int, float> _playerAnimationImages = new();
+    private readonly Dictionary<int, float> _playerWeaponFlashTimes = new();
+    private readonly Dictionary<int, int> _playerPreviousAmmoCounts = new();
+    private readonly Dictionary<int, int> _playerPreviousCooldownTicks = new();
+    private readonly Dictionary<int, Vector2> _playerPreviousRenderPositions = new();
+    private readonly Dictionary<int, double> _playerPreviousRenderSampleTimes = new();
+    private int? _localPlayerSnapshotEntityId;
+    private readonly Random _visualRandom = new(1337);
+    private bool _wasLocalPlayerAlive = true;
+    private bool _wasDeathCamActive;
+    private bool _wasMatchEnded;
+    private MouseState _previousMouse;
+    private bool _teamSelectOpen;
+    private float _teamSelectAlpha = 0.01f;
+    private float _teamSelectPanelY = -120f;
+    private int _teamSelectHoverIndex = -1;
+    private PlayerTeam? _pendingClassSelectTeam;
+    private bool _classSelectOpen;
+    private float _classSelectAlpha = 0.01f;
+    private float _classSelectPanelY = -120f;
+    private int _classSelectHoverIndex = -1;
+    private bool _scoreboardOpen;
+    private float _scoreboardAlpha = 0.02f;
+    private bool _chatOpen;
+    private bool _chatSubmitAwaitingOpenKeyRelease;
+    private string _chatInput = string.Empty;
+    private BubbleMenuKind _bubbleMenuKind;
+    private float _bubbleMenuAlpha = 0.01f;
+    private float _bubbleMenuX = -30f;
+    private bool _bubbleMenuClosing;
+    private int _bubbleMenuXPageIndex;
+    private bool _buildMenuOpen;
+    private bool _buildMenuClosing;
+    private float _buildMenuAlpha = 0.01f;
+    private float _buildMenuX = -37f;
+    private bool _pendingBuildSentry;
+    private bool _pendingDestroySentry;
+    private NoticeState? _notice;
+    private bool _hadLocalSentry;
+    private bool _wasCarryingIntel;
+    private bool _startupSplashOpen = true;
+    private int _startupSplashTicks;
+    private float _startupSplashFrame;
+    private bool _mainMenuOpen = true;
+    private bool _optionsMenuOpen;
+    private bool _optionsMenuOpenedFromGameplay;
+    private bool _lobbyBrowserOpen;
+    private bool _manualConnectOpen;
+    private bool _hostSetupOpen;
+    private bool _creditsOpen;
+    private bool _inGameMenuOpen;
+    private bool _inGameMenuAwaitingEscapeRelease;
+    private bool _controlsMenuOpen;
+    private bool _controlsMenuOpenedFromGameplay;
+    private bool _editingPlayerName;
+    private bool _editingConnectHost;
+    private bool _editingConnectPort;
+    private bool _passwordPromptOpen;
+    private string _passwordEditBuffer = string.Empty;
+    private string _passwordPromptMessage = string.Empty;
+    private int _mainMenuHoverIndex = -1;
+    private int _optionsHoverIndex = -1;
+    private int _controlsHoverIndex = -1;
+    private int _lobbyBrowserHoverIndex = -1;
+    private int _lobbyBrowserSelectedIndex = -1;
+    private int _hostSetupHoverIndex = -1;
+    private int _inGameMenuHoverIndex = -1;
+    private int _hostMapIndex;
+    private List<OpenGarrisonMapRotationEntry> _hostMapEntries = new();
+    private HostSetupEditField _hostSetupEditField;
+    private HostSetupTab _hostSetupTab;
+    private string _hostServerNameBuffer = "My Server";
+    private string _hostPortBuffer = "8190";
+    private string _hostSlotsBuffer = "10";
+    private string _hostPasswordBuffer = string.Empty;
+    private string _hostMapRotationFileBuffer = string.Empty;
+    private string _hostTimeLimitBuffer = "15";
+    private string _hostCapLimitBuffer = "5";
+    private string _hostRespawnSecondsBuffer = "5";
+    private bool _hostLobbyAnnounceEnabled = true;
+    private bool _hostAutoBalanceEnabled = true;
+    private readonly List<string> _hostedServerConsoleLines = new();
+    private string _hostedServerCommandInput = string.Empty;
+    private string _hostedServerStatusName = "Offline";
+    private string _hostedServerStatusPort = "--";
+    private string _hostedServerStatusPlayers = "0/0";
+    private string _hostedServerStatusLobby = "Lobby unknown";
+    private string _hostedServerStatusMap = "Map unknown";
+    private string _hostedServerStatusRules = "Rules unknown";
+    private string _hostedServerStatusRuntime = "No live server output yet.";
+    private string _hostedServerStatusWorld = "World bounds unknown";
+    private HostedServerSessionInfo? _hostedServerSession;
+    private int _hostedServerStatePollTicks;
+    private string _playerNameEditBuffer = string.Empty;
+    private string _connectHostBuffer = "127.0.0.1";
+    private string _connectPortBuffer = "8190";
+    private string _menuStatusMessage = string.Empty;
+    private bool _devMessageCheckStarted;
+    private bool _devMessageCheckFinished;
+    private Task<DevMessageFetchResult>? _devMessageFetchTask;
+    private readonly Queue<DevMessagePopupState> _pendingDevMessagePopups = new();
+    private DevMessagePopupState? _activeDevMessagePopup;
+    private string _autoBalanceNoticeText = string.Empty;
+    private int _autoBalanceNoticeTicks;
+    private bool _killCamEnabled = true;
+    private int _particleMode;
+    private int _gibLevel = 3;
+    private bool _healerRadarEnabled = true;
+    private bool _showHealerEnabled = true;
+    private bool _showHealingEnabled = true;
+    private bool _showHealthBarEnabled;
+    private int _menuImageFrame;
+    private ControlsMenuBinding? _pendingControlsBinding;
+    private readonly List<ChatLine> _chatLines = new();
+
+    public Game1(GameStartupMode startupMode = GameStartupMode.Client)
+    {
+        _startupMode = startupMode;
+        _clientSettings = ClientSettings.Load();
+        _inputBindings = InputBindingsSettings.Load();
+        _graphics = new GraphicsDeviceManager(this);
+        Content.RootDirectory = "Content";
+        IsMouseVisible = false;
+        _graphics.PreferredBackBufferWidth = 1280;
+        _graphics.PreferredBackBufferHeight = 720;
+
+        ReinitializeSimulationForTickRate(SimulationConfig.DefaultTicksPerSecond);
+        _assetManifest = GameMakerAssetManifestImporter.ImportProjectAssets();
+        ApplyLoadedSettings();
+
+        IsFixedTimeStep = true;
+        TargetElapsedTime = TimeSpan.FromSeconds(1d / ClientUpdateTicksPerSecond);
+    }
+
+    protected override void Initialize()
+    {
+        Window.TextInput += OnWindowTextInput;
+        Window.Title = _startupMode == GameStartupMode.ServerLauncher
+            ? $"OpenGarrison.ServerLauncher - Proto (Protocol v{ProtocolVersion.Current})"
+            : $"OpenGarrison.Client - Proto (Protocol v{ProtocolVersion.Current})";
+        _menuImageFrame = _visualRandom.Next(2);
+        _playerNameEditBuffer = _world.LocalPlayer.DisplayName;
+        AddConsoleLine("debug console ready (`)");
+        if (_startupMode == GameStartupMode.ServerLauncher)
+        {
+            InitializeServerLauncherMode();
+        }
+
+        base.Initialize();
+    }
+
+    protected override void LoadContent()
+    {
+        _spriteBatch = new SpriteBatch(GraphicsDevice);
+        _pixel = new Texture2D(GraphicsDevice, 1, 1);
+        _pixel.SetData(new[] { Color.White });
+        _consoleFont = Content.Load<SpriteFont>("ConsoleFont");
+        _runtimeAssets = new GameMakerRuntimeAssetCache(GraphicsDevice, _assetManifest);
+        LoadMenuMusic();
+        LoadFaucetMusic();
+        LoadIngameMusic();
+        AddConsoleLine($"gm assets sprites={_assetManifest.Sprites.Count} backgrounds={_assetManifest.Backgrounds.Count} sounds={_assetManifest.Sounds.Count}");
+    }
+
+    protected override void UnloadContent()
+    {
+        _menuMusicInstance?.Dispose();
+        _menuMusic?.Dispose();
+        _faucetMusicInstance?.Dispose();
+        _faucetMusic?.Dispose();
+        _ingameMusicInstance?.Dispose();
+        _ingameMusic?.Dispose();
+        StopHostedServer();
+        _networkClient.Dispose();
+        _runtimeAssets?.Dispose();
+        _menuBackgroundTexture?.Dispose();
+        _deathCamCaptureTarget?.Dispose();
+        _deathCamCaptureTarget = null;
+        _menuBackgroundTexture = null;
+        PersistClientSettings();
+        PersistInputBindings();
+        base.UnloadContent();
+    }
+
+    protected override void Update(GameTime gameTime)
+    {
+        BeginNetworkDiagnosticsFrame(gameTime);
+        _networkInterpolationClockSeconds = _networkInterpolationClock.Elapsed.TotalSeconds;
+        var clientTicks = ConsumeClientTickCount(gameTime);
+        var keyboard = Keyboard.GetState();
+        var mouse = Mouse.GetState();
+        if (TryHandlePasswordPromptCancel(keyboard, mouse))
+        {
+            FinalizeNetworkDiagnosticsFrame();
+            base.Update(gameTime);
+            return;
+        }
+
+        var toggleConsolePressed = keyboard.IsKeyDown(_inputBindings.ToggleConsole) && !_previousKeyboard.IsKeyDown(_inputBindings.ToggleConsole);
+        if (toggleConsolePressed && !_mainMenuOpen)
+        {
+            _consoleOpen = !_consoleOpen;
+        }
+
+        if (TryUpdateNonGameplayFrame(gameTime, keyboard, mouse, clientTicks))
+        {
+            FinalizeNetworkDiagnosticsFrame();
+            base.Update(gameTime);
+            return;
+        }
+
+        UpdateGameplayFrame(gameTime, keyboard, mouse, clientTicks);
+        FinalizeNetworkDiagnosticsFrame();
+
+        base.Update(gameTime);
+    }
+
+    protected override void Draw(GameTime gameTime)
+    {
+        _networkInterpolationClockSeconds = _networkInterpolationClock.Elapsed.TotalSeconds;
+        GraphicsDevice.Clear(new Color(24, 32, 48));
+
+        if (TryDrawNonGameplayFrame())
+        {
+            base.Draw(gameTime);
+            return;
+        }
+        DrawGameplayFrame(gameTime);
+
+        base.Draw(gameTime);
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    private sealed class NoticeState
+    {
+        public NoticeState(NoticeKind kind, float alpha, bool done, int ticksRemaining)
+        {
+            Kind = kind;
+            Alpha = alpha;
+            Done = done;
+            TicksRemaining = ticksRemaining;
+        }
+
+        public NoticeKind Kind { get; set; }
+
+        public float Alpha { get; set; }
+
+        public bool Done { get; set; }
+
+        public int TicksRemaining { get; set; }
+    }
+
+    private sealed class ChatLine
+    {
+        public ChatLine(string text, Color color)
+        {
+            Text = text;
+            Color = color;
+            TicksRemaining = 600;
+        }
+
+        public string Text { get; }
+
+        public Color Color { get; }
+
+        public int TicksRemaining { get; set; }
+    }
+
+    private sealed class DevMessagePopupState
+    {
+        public DevMessagePopupState(
+            string title,
+            string message,
+            string primaryButtonLabel,
+            string secondaryButtonLabel,
+            bool canRunPrimaryAction,
+            string? primaryActionPath = null)
+        {
+            Title = title;
+            Message = message;
+            PrimaryButtonLabel = primaryButtonLabel;
+            SecondaryButtonLabel = secondaryButtonLabel;
+            CanRunPrimaryAction = canRunPrimaryAction;
+            PrimaryActionPath = primaryActionPath;
+        }
+
+        public string Title { get; }
+
+        public string Message { get; }
+
+        public string PrimaryButtonLabel { get; }
+
+        public string SecondaryButtonLabel { get; }
+
+        public bool CanRunPrimaryAction { get; }
+
+        public string? PrimaryActionPath { get; }
+    }
+}
