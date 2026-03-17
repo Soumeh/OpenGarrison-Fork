@@ -31,5 +31,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            OpenGarrison-linux-x64.zip
-            OpenGarrison-win-x64.zip
+            OpenGarrison-Linux-x64.zip
+            OpenGarrison-Windows-x64.zip
