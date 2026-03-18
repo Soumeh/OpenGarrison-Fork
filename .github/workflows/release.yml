@@ -24,12 +24,13 @@ jobs:
 
       - name: Zip artifacts
         run: |
-          zip -r OpenGarrison-Linux-x64.zip dist/linux-x64/
-          zip -r OpenGarrison-Windows-x64.zip dist/win-x64/
+          cd dist
+          (cd linux-x64 && zip -r ../OpenGarrison-Linux-x64.zip .)
+          (cd win-x64 && zip -r ../OpenGarrison-Windows-x64.zip .)
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            OpenGarrison-Linux-x64.zip
-            OpenGarrison-Windows-x64.zip
+            dist/OpenGarrison-Linux-x64.zip
+            dist/OpenGarrison-Windows-x64.zip
